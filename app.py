@@ -287,11 +287,12 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
             with st.expander(f"📊 Sinyal & Bit: '{msg['text']}'"):
                 rows = [get_char_analysis(ch) for ch in msg["text"]]
                 
-                # 1. Gunakan st.dataframe (Tabel native Streamlit, 100% rapi tanpa bocor teks HTML)
+                # Tambahkan kolom "Kode" (Desimal) sebelum Hex
                 data_table = []
                 for r in rows:
                     data_table.append({
                         "Karakter": r['char'],
+                        "Kode": r['ascii_code'],
                         "Hex": r['hex'],
                         "Biner 7 bit (MSB)": r['bin_7bit'],
                         "Parity Even": r['parity_even'],
@@ -299,7 +300,7 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
                     })
                 st.dataframe(data_table, use_container_width=True, hide_index=True)
                 
-                # 2. Render Visual Sinyal NRZ-I SVG
+                # Render Visual Sinyal NRZ-I SVG
                 st.caption("Visual Sinyal NRZ-I (Level Awal: LOW)")
                 svg_code = generate_nrzi_svg(msg["text"], initial_level="LOW")
                 components.html(
