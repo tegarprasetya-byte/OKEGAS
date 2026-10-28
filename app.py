@@ -273,6 +273,7 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
             align_cls = "flex-end" if is_me else "flex-start"
             bg_color = "#dcf8c6" if is_me else "#ffffff"
             
+            # Gelembung Pesan
             st.markdown(f'''
                 <div style="display:flex; justify-content:{align_cls}; margin-bottom:8px;">
                     <div style="background-color:{bg_color}; padding:8px 12px; border-radius:8px; max-width:70%; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
@@ -282,47 +283,30 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
                 </div>
             ''', unsafe_allow_html=True)
             
-            # Tabel Analisis Sinyal per Pesan
-            
-            # Ganti blok pembuatan tabel di dalam expander dengan kode ini:
-            with st.expander(f"🔍 Lihat Sinyal & Analisis Bit: '{msg['text']}'"):
+            # Expander Analisis Sinyal & Bit
+            with st.expander(f"📊 Sinyal & Bit: '{msg['text']}'"):
                 rows = [get_char_analysis(ch) for ch in msg["text"]]
-    
-    # 1. Gunakan triple quotes agar string HTML lebih bersih
-    table_rows = ""
-    for r in rows:
-        char_disp = html.escape(r['char'])
-        table_rows += f"""
-            <tr style="border-bottom:1px solid #eee;">
-                <td><b>{char_disp}</b></td>
-                <td>{r['hex']}</td>
-                <td>{r['bin_7bit']}</td>
-                <td>{r['parity_even']}</td>
-                <td>{r['end']}</td>
-            </tr>
-        """
-        
-    table_html = f"""
-    <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center; margin-bottom:15px;">
-        <thead>
-            <tr style="background-color:#f0f2f6; border-bottom:1px solid #ccc;">
-                <th>Karakter</th><th>Hex</th><th>Biner 7 bit (MSB)</th><th>Parity Even</th><th>End</th>
-            </tr>
-        </thead>
-        <tbody>
-            {table_rows}
-        </tbody>
-    </table>
-    """
-    
-    # 2. Tampilkan tabel dengan st.markdown dan unsafe_allow_html=True
-    st.markdown(table_html, unsafe_allow_html=True)
-    
-    # Visualisasi NRZ-I
-    init_lvl = st.radio("Level Awal Gelombang", ["LOW", "HIGH"], key=f"lvl_{msg['id']}", horizontal=True)
-    svg_code = generate_nrzi_svg(msg["text"], initial_level=init_lvl)
-    components.html(f'<div style="overflow-x:auto;">{svg_code}</div>', height=270, scrolling=True)
-
+                
+                # 1. Gunakan st.dataframe (Tabel native Streamlit, 100% rapi tanpa bocor teks HTML)
+                data_table = []
+                for r in rows:
+                    data_table.append({
+                        "Karakter": r['char'],
+                        "Hex": r['hex'],
+                        "Biner 7 bit (MSB)": r['bin_7bit'],
+                        "Parity Even": r['parity_even'],
+                        "End": r['end']
+                    })
+                st.dataframe(data_table, use_container_width=True, hide_index=True)
+                
+                # 2. Render Visual Sinyal NRZ-I SVG
+                st.caption("Visual Sinyal NRZ-I (Level Awal: LOW)")
+                svg_code = generate_nrzi_svg(msg["text"], initial_level="LOW")
+                components.html(
+                    f'<div style="overflow-x:auto; background:white; padding:10px; border-radius:5px;">{svg_code}</div>',
+                    height=270,
+                    scrolling=True
+                )
 # -----------------------------------------------------------------------------
 # 5. HALAMAN UTAMA APLIKASI
 # -----------------------------------------------------------------------------
