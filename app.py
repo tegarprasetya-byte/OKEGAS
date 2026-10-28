@@ -5,35 +5,44 @@ import bcrypt
 from datetime import datetime
 import html
 
-# -----------------------------------------------------------------------------
-# 0. KONFIGURASI HALAMAN & INTI DATABASE
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 0. KONFIGURASI HALAMAN & ENGINES DATABASE (SUPABASE)
+# =============================================================================
+# Mengatur judul halaman web, ikon browser, dan tata letak lebar (wide mode)
 st.set_page_config(page_title="ASCII Chat & Signal Lab", page_icon="💬", layout="wide")
 
 @st.cache_resource
 def get_supabase() -> Client:
+    """
+    Menginisialisasi koneksi tunggal ke database Supabase.
+    Membaca kredensial rahasia (URL & API Key) dari st.secrets.
+    """
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
+# Objek klien Supabase untuk eksekusi query ke tabel Postgres
 supabase = get_supabase()
 
-# Inisialisasi Sesi
+# Inisialisasi variabel status sesi (Session State) untuk autentikasi dan kontak aktif
 if "user" not in st.session_state:
     st.session_state.user = None
 if "active_contact" not in st.session_state:
     st.session_state.active_contact = None
 
-# -----------------------------------------------------------------------------
-# 1. MODUL AUTENTIKASI & SANDI
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 1. MODUL AUTENTIKASI & KEAMANAN KATASANDI
+# =============================================================================
 def hash_password(password: str) -> str:
+    """Mengenkripsi password teks biasa menjadi hash bcrypt dengan garam (salt)."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 def check_password(password: str, hashed: str) -> bool:
+    """Memverifikasi kecocokan antara password teks biasa dan hash tersimpan."""
     return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
 
 def register_user(user_id: str, email: str, password: str) -> bool:
+    """Memasukkan data pendaftaran pengguna baru ke dalam tabel 'users' di Supabase."""
     try:
         pw_hash = hash_password(password)
         supabase.table("users").insert({
@@ -47,6 +56,7 @@ def register_user(user_id: str, email: str, password: str) -> bool:
         return False
 
 def login_user(user_id: str, email: str, password: str):
+    """Memeriksa keberadaan pengguna dan validitas password untuk proses masuk."""
     res = supabase.table("users").select("*").eq("user_id", user_id).eq("email", email).execute()
     if res.data:
         user_data = res.data[0]
@@ -55,9 +65,11 @@ def login_user(user_id: str, email: str, password: str):
     return None
 
 def render_auth_view():
+    """Menampilkan antarmuka tab 'Masuk' dan 'Daftar' sebelum pengguna mengakses chat."""
     st.title("🔐 Akses Sistem Komunikasi Data")
     tab_masuk, tab_daftar = st.tabs(["Masuk", "Daftar"])
 
+    # --- TAB MASUK ---
     with tab_masuk:
         st.subheader("Login Pengguna")
         u_id = st.text_input("ID Pengguna", key="l_id")
@@ -75,6 +87,7 @@ def render_auth_view():
                 else:
                     st.error("Kombinasi ID Pengguna, Email, dan Password tidak cocok.")
 
+    # --- TAB DAFTAR ---
     with tab_daftar:
         st.subheader("Pendaftaran Akun Baru")
         reg_id = st.text_input("ID Pengguna (Unik)", key="r_id")
@@ -93,10 +106,14 @@ def render_auth_view():
                 if register_user(reg_id, reg_email, reg_pass):
                     st.success("Pendaftaran berhasil! Silakan berpindah ke tab 'Masuk'.")
 
-# -----------------------------------------------------------------------------
-# 2. LOGIKA ASCII ENCODING & PARITY (EVEN)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 2. LOGIKA VALIDASI ASCII & KALKULASI PARITY (EVEN)
+# =============================================================================
 def validate_ascii(text: str):
+    """
+    Memvalidasi apakah seluruh karakter berada pada rentang ASCII tercetak (32-126).
+    Menolak pengiriman jika terdapat karakter non-ASCII/Emoji.
+    """
     for ch in text:
         code = ord(ch)
         if code < 32 or code > 126:
@@ -105,13 +122,17 @@ def validate_ascii(text: str):
     return True, ""
 
 def get_char_analysis(ch: str):
+    """
+    Mengonversi 1 karakter menjadi informasi bit:
+    Kode Desimal, Hexadecimal, Biner 7 bit (MSB dulu), Parity Even, dan End bit (1).
+    Membuat susunan frame 10 bit: S (0) + 7 bit Data + Parity (P) + End (1).
+    """
     code = ord(ch)
     hex_str = f"{code:02X}"
-    bin_7bit = f"{code:07b}"  # MSB first
+    bin_7bit = f"{code:07b}"  # MSB terlebih dahulu
     ones_count = bin_7bit.count('1')
-    parity_even = 1 if (ones_count % 2 != 0) else 0
+    parity_even = 1 if (ones_count % 2 != 0) else 0  # Parity 1 jika total bit 1 ganjil
     
-    # Structure 10-bit frame: S(0) + 7-bit + P + E(1)
     frame_bits = f"0{bin_7bit}{parity_even}1"
     
     return {
@@ -124,23 +145,27 @@ def get_char_analysis(ch: str):
         "frame_bits": frame_bits
     }
 
-# -----------------------------------------------------------------------------
-# 3. PENGGAMBAR SINYAL SVG NRZ-I
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 3. GENERATOR GELOMBANG SINYAL NRZ-I (SVG HTML)
+# =============================================================================
 def generate_nrzi_svg(text: str, initial_level: str = "LOW") -> str:
+    """
+    Menghasilkan kode SVG gelombang digital NRZ-I dengan aturan:
+    - Bit 1: Membalik level sinyal (Invert/Toggle).
+    - Bit 0: Mempertahankan level sinyal sebelumnya.
+    - Menggambar header karakter, pembagi frame, kurung penyangga bit (S, Data, P, E).
+    """
     if not text:
         return "<p>Tidak ada pesan untuk ditampilkan.</p>"
 
     frames = [get_char_analysis(ch) for ch in text]
     
-    # Konfigurasi SVG Dimensi
+    # Pengaturan dimensi gambar SVG
     bit_width = 24
-    top_margin = 40
     wave_top = 70
     wave_bottom = 150
     bottom_text_y = 180
     bracket_y = 205
-    label_y = 225
     height = 250
     
     total_bits = len(frames) * 10
@@ -151,8 +176,8 @@ def generate_nrzi_svg(text: str, initial_level: str = "LOW") -> str:
     svg_parts = []
     svg_parts.append(f'<svg width="{width}" height="{height}" xmlns="http://www.w3.org/2000/svg" style="background-color:#ffffff; font-family: monospace;">')
     
-    # Sub-fungsi menggambar kurung siku penyangga bit
     def draw_bracket(x1, x2, y, text_label):
+        """Fungsi pembantu membuat kurung siku dan label bagian bawah frame."""
         mid = (x1 + x2) / 2
         return f'''
             <path d="M {x1+2} {y} L {x1+2} {y+6} L {x2-2} {y+6} L {x2-2} {y}" stroke="#444" stroke-width="1.5" fill="none"/>
@@ -166,25 +191,25 @@ def generate_nrzi_svg(text: str, initial_level: str = "LOW") -> str:
         frame_start_x = global_bit_idx * bit_width + 20
         frame_end_x = frame_start_x + 10 * bit_width
         
-        # Header Karakter
+        # Nama Karakter di atas frame
         escaped_char = html.escape(frame["char"])
         svg_parts.append(f'<text x="{(frame_start_x + frame_end_x)/2}" y="25" font-size="14" font-weight="bold" text-anchor="middle" fill="#111">Huruf {escaped_char}</text>')
         
-        # Line Batas Frame (Sebelah Kiri)
+        # Garis batas frame tebal (sisi kiri)
         svg_parts.append(f'<line x1="{frame_start_x}" y1="35" x2="{frame_start_x}" y2="{wave_bottom+10}" stroke="#000" stroke-width="2"/>')
         
         for b_idx, bit_char in enumerate(frame["frame_bits"]):
             x1 = (global_bit_idx) * bit_width + 20
             x2 = x1 + bit_width
             
-            # Pembagi Bit Sub-kolom
+            # Garis putus-putus vertikal penanda sub-kolom bit
             if b_idx > 0:
                 svg_parts.append(f'<line x1="{x1}" y1="55" x2="{x1}" y2="{wave_bottom+5}" stroke="#e0e0e0" stroke-width="1" stroke-dasharray="3,3"/>')
             
-            # Kalkulasi NRZ-I
+            # Pengolahan Sinyal NRZ-I
             bit_val = int(bit_char)
             if bit_val == 1:
-                current_level = 1 - current_level  # Invert level pada bit 1
+                current_level = 1 - current_level  # Bit 1 = membalikkan level
             
             y_val = wave_top if current_level == 1 else wave_bottom
             
@@ -193,58 +218,60 @@ def generate_nrzi_svg(text: str, initial_level: str = "LOW") -> str:
             else:
                 wave_path += f"L {x1} {y_val} L {x2} {y_val} "
 
-            # Teks Bit Nilai
+            # Teks deretan bit angka bawah
             svg_parts.append(f'<text x="{(x1+x2)/2}" y="{bottom_text_y}" font-size="13" font-weight="bold" text-anchor="middle" fill="#222">{bit_char}</text>')
             
             global_bit_idx += 1
 
-        # Kurung & Label bagian bawah frame
+        # Pembuatan kurung & label struktur bit frame
         svg_parts.append(draw_bracket(frame_start_x, frame_start_x + bit_width, bracket_y, "S"))
         svg_parts.append(draw_bracket(frame_start_x + bit_width, frame_start_x + 8*bit_width, bracket_y, f'Data "{escaped_char}"'))
         svg_parts.append(draw_bracket(frame_start_x + 8*bit_width, frame_start_x + 9*bit_width, bracket_y, "P"))
         svg_parts.append(draw_bracket(frame_start_x + 9*bit_width, frame_end_x, bracket_y, "E"))
 
-    # Line Batas Frame Paling Akhir
+    # Garis batas frame paling kanan
     last_x = global_bit_idx * bit_width + 20
     svg_parts.append(f'<line x1="{last_x}" y1="35" x2="{last_x}" y2="{wave_bottom+10}" stroke="#000" stroke-width="2"/>')
 
-    # Gelombang Sinyal Utama
+    # Gelombang Sinyal Hijau
     svg_parts.append(f'<path d="{wave_path}" stroke="#1D9E75" stroke-width="3.5" fill="none" stroke-linejoin="miter"/>')
     svg_parts.append('</svg>')
 
     return "".join(svg_parts)
 
-# -----------------------------------------------------------------------------
-# 4. MODUL PESAN & DUKUNGAN REALTIME (POLLING)
-# -----------------------------------------------------------------------------
+# =============================================================================
+# 4. MODUL QUERY DATABASE & POLLING REALTIME PESAN
+# =============================================================================
 def fetch_contacts(user_id: str):
+    """Mengambil daftar ID kontak yang terhubung dengan pengguna saat ini."""
     res = supabase.table("contacts").select("contact_id").eq("user_id", user_id).execute()
     return [item["contact_id"] for item in res.data]
 
 def add_contact(user_id: str, contact_id: str):
+    """Menambahkan hubungan kontak dua arah (timbal balik) di database."""
     if user_id == contact_id:
         return False, "Tidak dapat menambahkan diri sendiri."
     
-    # Cek ketersediaan target user
     u_check = supabase.table("users").select("user_id").eq("user_id", contact_id).execute()
     if not u_check.data:
         return False, "ID Pengguna tidak ditemukan."
     
     try:
         supabase.table("contacts").insert({"user_id": user_id, "contact_id": contact_id}).execute()
-        # Otomatis menambahkan hubungan timbal balik
         supabase.table("contacts").upsert({"user_id": contact_id, "contact_id": user_id}).execute()
         return True, "Kontak berhasil ditambahkan."
     except Exception as e:
         return False, "Kontak sudah ada dalam daftar."
 
 def fetch_messages(user_id: str, contact_id: str):
+    """Mengambil riwayat percakapan antara dua pengguna dari tabel 'messages'."""
     res = supabase.table("messages").select("*").or_(
         f"and(sender_id.eq.{user_id},receiver_id.eq.{contact_id}),and(sender_id.eq.{contact_id},receiver_id.eq.{user_id})"
     ).order("created_at", desc=False).execute()
     return res.data
 
 def send_message(sender_id: str, receiver_id: str, text: str):
+    """Validasi ASCII dan pengiriman pesan baru ke database Supabase."""
     valid, err_msg = validate_ascii(text)
     if not valid:
         return False, err_msg
@@ -261,6 +288,11 @@ def send_message(sender_id: str, receiver_id: str, text: str):
 
 @st.fragment(run_every=2)
 def render_realtime_chat_box(current_user_id: str, target_user_id: str):
+    """
+    Fragment Realtime Streamlit:
+    Melakukan polling ke database setiap 2 detik untuk menyegarkan percakapan,
+    tabel analisis bit (st.dataframe), dan visualisasi gelombang NRZ-I.
+    """
     messages = fetch_messages(current_user_id, target_user_id)
     
     chat_container = st.container(height=400)
@@ -269,25 +301,23 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
             st.info("Belum ada pesan. Mulai percakapan!")
         for msg in messages:
             is_me = (msg["sender_id"] == current_user_id)
-            ts = datetime.fromisoformat(msg["created_at"].replace("Z", "+00:00")).strftime("%H:%M")
             align_cls = "flex-end" if is_me else "flex-start"
             bg_color = "#dcf8c6" if is_me else "#ffffff"
             
-            # Gelembung Pesan
+            # Gelembung Pesan Teks (Tanpa Jam)
             st.markdown(f'''
                 <div style="display:flex; justify-content:{align_cls}; margin-bottom:8px;">
                     <div style="background-color:{bg_color}; padding:8px 12px; border-radius:8px; max-width:70%; box-shadow:0 1px 2px rgba(0,0,0,0.15);">
                         <div style="font-size:14px; color:#111; word-wrap:break-word;">{html.escape(msg["text"])}</div>
-                        <div style="font-size:10px; color:#777; text-align:right; margin-top:3px;">{ts}</div>
                     </div>
                 </div>
             ''', unsafe_allow_html=True)
             
-            # Expander Analisis Sinyal & Bit
+            # Panel Expander Analisis Sinyal per Pesan
             with st.expander(f"📊 Sinyal & Bit: '{msg['text']}'"):
                 rows = [get_char_analysis(ch) for ch in msg["text"]]
                 
-                # Tambahkan kolom "Kode" (Desimal) sebelum Hex
+                # Tabel Dataframe Streamlit (Karakter, Kode, Hex, Biner, Parity, End)
                 data_table = []
                 for r in rows:
                     data_table.append({
@@ -300,7 +330,7 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
                     })
                 st.dataframe(data_table, use_container_width=True, hide_index=True)
                 
-                # Render Visual Sinyal NRZ-I SVG
+                # Visualisasi Gelombang NRZ-I
                 st.caption("Visual Sinyal NRZ-I (Level Awal: LOW)")
                 svg_code = generate_nrzi_svg(msg["text"], initial_level="LOW")
                 components.html(
@@ -308,13 +338,15 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
                     height=270,
                     scrolling=True
                 )
-# -----------------------------------------------------------------------------
+
+# =============================================================================
 # 5. HALAMAN UTAMA APLIKASI
-# -----------------------------------------------------------------------------
+# =============================================================================
 def render_main_view():
+    """Tampilan utama setelah pengguna berhasil masuk/login."""
     user = st.session_state.user
     
-    # Header Navigasi
+    # Bilah Atas / Header Navigasi
     c_head1, c_head2 = st.columns([4, 1])
     with c_head1:
         st.subheader(f"👋 Selamat Datang, {user['user_id']}")
@@ -326,7 +358,7 @@ def render_main_view():
 
     st.caption("Encoding: ASCII 7 bit. ANSI, UTF-8, dan UTF-16 tidak didukung sebagai encoding aplikasi.")
 
-    # Panel Uji Karakter (Stand Alone Tool)
+    # Panel Mandiri Uji Karakter ASCII
     with st.expander("🧪 Panel Uji Karakter (Validator ASCII)"):
         test_input = st.text_input("Ketik kalimat/teks bebas untuk verifikasi:", "IBNU")
         if test_input:
@@ -341,7 +373,7 @@ def render_main_view():
 
     st.divider()
 
-    # Layout Utama Chat (Dua Kolom)
+    # Layout Utama Chat (Kolom Kiri: Kontak | Kolom Kanan: Obrolan)
     col_left, col_right = st.columns([1, 2])
 
     with col_left:
@@ -359,7 +391,7 @@ def render_main_view():
                 else:
                     st.error(msg)
         
-        # List Kontak
+        # Daftar Kontak Tersimpan
         contacts = fetch_contacts(user["user_id"])
         if not contacts:
             st.info("Belum ada kontak. Tambahkan kontak berdasarkan ID.")
@@ -377,10 +409,10 @@ def render_main_view():
         else:
             st.subheader(f"💬 Percakapan dengan: {active_contact}")
             
-            # Area Chat Realtime Fragment
+            # Area Percakapan Realtime
             render_realtime_chat_box(user["user_id"], active_contact)
             
-            # Form Pengiriman Pesan
+            # Form Pengiriman Pesan Baru
             with st.form("send_msg_form", clear_on_submit=True):
                 txt_input = st.text_input("Ketik pesan ASCII (Kode 32-126):", key="chat_input")
                 btn_send = st.form_submit_button("Kirim Pesan", type="primary")
@@ -392,9 +424,9 @@ def render_main_view():
                     else:
                         st.rerun()
 
-# -----------------------------------------------------------------------------
+# =============================================================================
 # RUNNER UTAMA
-# -----------------------------------------------------------------------------
+# =============================================================================
 if st.session_state.user is None:
     render_auth_view()
 else:
