@@ -283,34 +283,45 @@ def render_realtime_chat_box(current_user_id: str, target_user_id: str):
             ''', unsafe_allow_html=True)
             
             # Tabel Analisis Sinyal per Pesan
+            
+            # Ganti blok pembuatan tabel di dalam expander dengan kode ini:
             with st.expander(f"🔍 Lihat Sinyal & Analisis Bit: '{msg['text']}'"):
                 rows = [get_char_analysis(ch) for ch in msg["text"]]
-                table_html = """
-                <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center;">
-                    <thead>
-                        <tr style="background-color:#f0f2f6; border-bottom:1px solid #ccc;">
-                            <th>Karakter</th><th>Hex</th><th>Biner 7 bit (MSB)</th><th>Parity Even</th><th>End</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                """
-                for r in rows:
-                    table_html += f"""
-                        <tr style="border-bottom:1px solid #eee;">
-                            <td><b>{html.escape(r['char'])}</b></td>
-                            <td>{r['hex']}</td>
-                            <td>{r['bin_7bit']}</td>
-                            <td>{r['parity_even']}</td>
-                            <td>{r['end']}</td>
-                        </tr>
-                    """
-                table_html += "</tbody></table>"
-                st.markdown(table_html, unsafe_allow_html=True)
-                
-                # Visualisasi NRZ-I
-                init_lvl = st.radio("Level Awal Gelombang", ["LOW", "HIGH"], key=f"lvl_{msg['id']}", horizontal=True)
-                svg_code = generate_nrzi_svg(msg["text"], initial_level=init_lvl)
-                components.html(f'<div style="overflow-x:auto;">{svg_code}</div>', height=270, scrolling=True)
+    
+    # 1. Gunakan triple quotes agar string HTML lebih bersih
+    table_rows = ""
+    for r in rows:
+        char_disp = html.escape(r['char'])
+        table_rows += f"""
+            <tr style="border-bottom:1px solid #eee;">
+                <td><b>{char_disp}</b></td>
+                <td>{r['hex']}</td>
+                <td>{r['bin_7bit']}</td>
+                <td>{r['parity_even']}</td>
+                <td>{r['end']}</td>
+            </tr>
+        """
+        
+    table_html = f"""
+    <table style="width:100%; border-collapse:collapse; font-size:12px; text-align:center; margin-bottom:15px;">
+        <thead>
+            <tr style="background-color:#f0f2f6; border-bottom:1px solid #ccc;">
+                <th>Karakter</th><th>Hex</th><th>Biner 7 bit (MSB)</th><th>Parity Even</th><th>End</th>
+            </tr>
+        </thead>
+        <tbody>
+            {table_rows}
+        </tbody>
+    </table>
+    """
+    
+    # 2. Tampilkan tabel dengan st.markdown dan unsafe_allow_html=True
+    st.markdown(table_html, unsafe_allow_html=True)
+    
+    # Visualisasi NRZ-I
+    init_lvl = st.radio("Level Awal Gelombang", ["LOW", "HIGH"], key=f"lvl_{msg['id']}", horizontal=True)
+    svg_code = generate_nrzi_svg(msg["text"], initial_level=init_lvl)
+    components.html(f'<div style="overflow-x:auto;">{svg_code}</div>', height=270, scrolling=True)
 
 # -----------------------------------------------------------------------------
 # 5. HALAMAN UTAMA APLIKASI
